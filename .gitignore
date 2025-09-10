@@ -1,0 +1,6 @@
+*.uv
+*.toml
+
+/scratch_nano_gpt
+.sh
+uv.lock
