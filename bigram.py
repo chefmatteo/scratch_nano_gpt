@@ -1,11 +1,19 @@
 # gpt: generative pretraining transformer; 
 # recreating chatgpt from scratch 
-# author: Matthew Ng @ust
+# author: Matthew Ng @ust, {ctngah}@connect.ust.hk
 
 # Attention is all you need: 
 # train a transformer based model, character level
 
 # input: with a given amount of data, we would like the transformer able to predict the next character after a given sequence of characters. 
+# this model doesnt do anything yet because the only important part is that the nn.embedding, to create the look up table, but it is not actually a transformer. The model perform the same operation in both training and evaluation mode. 
+
+# we do not have the dropoff layer (i.e. temporarily remove/deactivate a certain % of neurons in neural network layer during each iteraction of the training process)
+# no batch normalization layer (i.e. normalize the input to the layer to have a mean of 0 and a standard deviation of 1)
+
+# Some model will hv different behaviour in inferencing and evaluation time, such as:
+# inference time: the duration it takes for a trainde machine learning model to process new input data and generate an output or prediction. 
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -49,8 +57,37 @@ def get_batch(split):
     x, y = x.to(device), y.to(device) # when we load the data, we move it to the device (cpu or gpu)
     return x, y
 
-@torch.no_grad() # decorator to turn off gradient tracking
+@torch.no_grad() # context manager to tell pytorch that everythings happened in this function: we will not call backward on the tensors in this function.
+# such that pytorch will not track the gradients of the tensors in this function and can be a lot more efficient with its memory usage because it doesnt call backward.
+
 def estimate_loss():
+    """
+    estimate_loss used to evaluate how well the model is performing on both the training and validation datasets.
+    It temporarily sets the model to evaluation mode (which disables certain layers like dropout), then repeatedly samples batches from both the training and validation splits.
+    For each batch, it computes the loss (a measure of how far the model's predictions are from the actual targets) and stores these losses.
+    After collecting losses for a number of batches (eval_iters), it averages them to get a representative loss value for each split.
+    Finally, it returns a dictionary containing the average loss for both the training and validation sets, and switches the model back to training mode.
+    
+    Example:
+    # The model outputs logits of shape (B, T, C), where:
+    #   B = batch size
+    #   T = Time sequence length (block_size)
+    #   C = number of classes (vocab_size)
+    # For each position in the sequence, the logits represent the (unnormalized) log-probabilities for each possible next character.
+    # The targets tensor contains the correct next character indices for each position.
+    
+    The loss is computed using cross-entropy:
+    For each position, the cross-entropy loss is:
+         -log(softmax(logits)[target]): this is the cross-entropy loss for the target character at the current position.
+    The total loss is the mean over all positions in the batch.
+    
+    Example:
+    x, y = get_batch('train')
+    logits, loss = model(x, y)
+    print("Loss:", loss.item())
+    
+    this approach reduce the noise of the loss, by averaging the losses over the eval_iters.
+    """
     out = {}
     model.eval()
     for split in ['train', 'val']:
@@ -59,7 +96,7 @@ def estimate_loss():
             X, Y = get_batch(split)
             logits, loss = model(X, Y)
             losses[k] = loss.item()
-        out[split] = losses.mean()
+        out[split] = losses.mean() # average the losses over the eval_iters
     model.train()
     return out
 
@@ -125,4 +162,5 @@ for iter in range(max_iters):
 
 # generate from the model
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
+print("Sample of the model's output:")
 print(decode(model.generate(context, max_new_tokens=500)[0].tolist()))
