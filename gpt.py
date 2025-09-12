@@ -7,7 +7,7 @@ batch_size = 64 # how many independent sequences will we process in parallel?
 block_size = 256 # what is the maximum context length for predictions?
 max_iters = 5000
 eval_interval = 500
-learning_rate = 3e-4
+learning_rate = 1e-3 # the self attention block cant tolerate very high learning rate
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
 n_embd = 384
@@ -65,9 +65,11 @@ class Head(nn.Module):
 
     def __init__(self, head_size):
         super().__init__()
+        # key, query, value projections for all heads, but in a batch
         self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
+        # we create a tril matrix to mask the future tokens
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
 
         self.dropout = nn.Dropout(dropout)
@@ -80,6 +82,8 @@ class Head(nn.Module):
         q = self.query(x) # (B,T,hs)
         # compute attention scores ("affinities")
         wei = q @ k.transpose(-2,-1) * k.shape[-1]**-0.5 # (B, T, hs) @ (B, hs, T) -> (B, T, T)
+        # make sure they dont communicate with the past
+        
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # (B, T, T)
         wei = F.softmax(wei, dim=-1) # (B, T, T)
         wei = self.dropout(wei)
@@ -161,11 +165,14 @@ class GPTLanguageModel(nn.Module):
 
         # idx and targets are both (B,T) tensor of integers
         tok_emb = self.token_embedding_table(idx) # (B,T,C)
-        pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T,C)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device) % block_size) # (T,C)
         x = tok_emb + pos_emb # (B,T,C)
         x = self.blocks(x) # (B,T,C)
         x = self.ln_f(x) # (B,T,C)
         logits = self.lm_head(x) # (B,T,vocab_size)
+        # x: combined information about the previous tokens
+        # lm_head: decoder head to project the embedding to the vocab size
+        # plug in a self - attention block to the transformer
 
         if targets is None:
             loss = None
@@ -180,7 +187,7 @@ class GPTLanguageModel(nn.Module):
     def generate(self, idx, max_new_tokens):
         # idx is (B, T) array of indices in the current context
         for _ in range(max_new_tokens):
-            # crop idx to the last block_size tokens
+            # crop idx to the last block_size tokens, such that we never use more than block_size tokens
             idx_cond = idx[:, -block_size:]
             # get the predictions
             logits, loss = self(idx_cond)

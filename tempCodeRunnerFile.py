@@ -21,13 +21,12 @@ from torch.nn import functional as F
 # hyperparameters
 batch_size = 32 # how many independent sequences will we process in parallel?
 block_size = 8 # what is the maximum context length for predictions?
-max_iters = 30000
-eval_interval = 3000
-learning_rate = 1e-3 # the self attention block cant tolerate very high learning rate
+max_iters = 3000
+eval_interval = 300
+learning_rate = 1e-2
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
 n_embd = 32
-dropout = 0.1
 # ------------
 
 torch.manual_seed(1337)
@@ -102,62 +101,7 @@ def estimate_loss():
     model.train()
     return out
 
-class Head(nn.Module):
-    """ one head of self-attention """
-
-    def __init__(self, head_size):
-        super().__init__()
-        # key, query, value projections for all heads, but in a batch
-        self.key = nn.Linear(n_embd, head_size, bias=False)
-        self.query = nn.Linear(n_embd, head_size, bias=False)
-        self.value = nn.Linear(n_embd, head_size, bias=False)
-        # we create a tril matrix to mask the future tokens
-        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x):
-        # input of size (batch, time-step, channels)
-        # output of size (batch, time-step, head size)
-        B,T,C = x.shape
-        k = self.key(x)   # (B,T,hs)
-        q = self.query(x) # (B,T,hs)
-        # compute attention scores ("affinities")
-        wei = q @ k.transpose(-2,-1) * k.shape[-1]**-0.5 # (B, T, hs) @ (B, hs, T) -> (B, T, T)
-        # make sure they dont communicate with the past
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # (B, T, T)
-        wei = F.softmax(wei, dim=-1) # (B, T, T)
-        wei = self.dropout(wei)
-        # perform the weighted aggregation of the values
-        v = self.value(x) # (B,T,hs)
-        out = wei @ v # (B, T, T) @ (B, T, hs) -> (B, T, hs)
-        return out
-
-class MultiHeadAttention(nn.Module):
-    """ multiple heads of self-attention in parallel """
-
-    def __init__(self, num_heads, head_size):
-        super().__init__()
-        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
-        self.proj = nn.Linear(n_embd, n_embd)
-        
-        
-    def forward(self, x): 
-        out = torch.cat([h(x) for h in self.heads], dim=-1)
-        out = self.proj(out)
-        return out 
-    # dim = -1 refers to the last dimension of a tensor
-    # In the context of torch.cat([h(x) for h in self.heads], dim=-1):
-    # - Each head outputs a tensor of shape (B, T , head_size)
-    # - We want to concatenate these outputs along the channel/feature dimension
-    # - dim=-1 means concatenate along the last dimension (the head_size dimension)
-    # - This results in a tensor of shape (B, T, num_heads * head_size)
-    # - For example, if we have 4 heads each with head_size=8, the concatenated result
-    #   will have shape (B, T, 32) where 32 = 4 * 8
-    # - This is the standard way to combine multiple attention heads in parallel
-    # concatenate the heads and project the result to the embedding dimension over the channel dime 
-    
-    # create multiple independent communication channels -> gather datas -> attention heads -> more expressive model 
-# super simple bigram model with attention
+# super simple bigram model
 class BigramLanguageModel(nn.Module):
     # no need to pass the vocab size because we are using the same vocab size for the input and output
 
@@ -165,33 +109,23 @@ class BigramLanguageModel(nn.Module):
         super().__init__()
         # each token directly reads off the logits for the next token from a lookup table
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        # n_embd is the number of embedding dimensions, intermediate representation of the token: 32 directional embedding
+        # n_embd is the number of embedding dimensions, intermediate representation of the token: 32 directional embedding
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         # block_size is the maximum context length for predictions, so we need to create a lookup table for the position embeddings
-        self.sa_head = MultiHeadAttention(4, n_embd // 4) # self-attention head
-        # n_embd // 4 is the number of heads, and n_embd is the number of embedding dimensions
-        # 4 communication channels -> 8 dimensional vectors, and that concatenate the heads and project the result to the embedding dimension over the channel dime -> 32 i.e. 4 heads of 8 - dimensional self-attention (similar to group convolution)
-        
-        self.lm_head = nn.Linear(n_embd, vocab_size) # linear layer to project the embedding to the vocab size
+        self.lm_head = nn.Linear(n_embd, vocab_size) # linear layer to project the embedding to the vocab size
         
     def forward(self, idx, targets=None):
 
         # idx and targets are both (B,T) tensor of integers
-        B, T = idx.shape
         tok_emb = self.token_embedding_table(idx) # (B,T,C)
-        # Handle variable sequence lengths during generation by using modulo
-        pos_emb = self.position_embedding_table(torch.arange(T, device=device) % block_size) 
-        # (T,C): used to add the position information to the token embeddings
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T,C): used to add the position information to the token embeddings
         # pos_emb gets broadcasted across the batch dimension (B) when added to tok_emb
         # This means the same position embeddings are applied to all sequences in the batch
         # x holds the token identities and the position information
         x = tok_emb + pos_emb # (B,T,C)
         
-        # apply self-attention to allow tokens to communicate with each other
-        x = self.sa_head(x) # (B,T,C)
-        
-        # project to vocab size for next token prediction
-        logits = self.lm_head(x) # (B,T,vocab_size)
+        # since it is just a bigram model, the position information is just ordinary translation variant, meaning is a simple linear combination of the token embeddings and the position embeddings -> that wouldnt help much rn.
+        logits = self.lm_head(tok_emb) # (B,T,vocab_size)
         
 
         if targets is None:
@@ -207,10 +141,8 @@ class BigramLanguageModel(nn.Module):
     def generate(self, idx, max_new_tokens):
         # idx is (B, T) array of indices in the current context
         for _ in range(max_new_tokens):
-            # crop idx to the last block_size tokens, such that we never use more than block_size tokens
-            idx_cond = idx[:, -block_size:]
-            # get the predictionsndex
-            logits, loss = self(idx_cond)
+            # get the predictions
+            logits, loss = self(idx)
             # focus only on the last time step
             logits = logits[:, -1, :] # becomes (B, C)
             # apply softmax to get probabilities
@@ -221,40 +153,6 @@ class BigramLanguageModel(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
         return idx
 
-    class Head(nn.Module):
-        """ one head of self-attention """
-
-        def __init__(self, head_size):
-            super().__init__()
-            # key, query, value projections for all heads, but in a batch
-            self.key = nn.Linear(n_embd, head_size, bias=False)
-            self.query = nn.Linear(n_embd, head_size, bias=False)
-            self.value = nn.Linear(n_embd, head_size, bias=False)
-            # we create a tril matrix to mask the future tokens
-            self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
-
-            self.dropout = nn.Dropout(dropout)
-
-        def forward(self, x):
-            # input of size (batch, time-step, channels)
-            # output of size (batch, time-step, head size)
-            B,T,C = x.shape
-            k = self.key(x)   # (B,T,hs)
-            q = self.query(x) # (B,T,hs)
-            # compute attention scores ("affinities")
-            wei = q @ k.transpose(-2,-1) * k.shape[-1]**-0.5 # (B, T, hs) @ (B, hs, T) -> (B, T, T)
-            # make sure they dont communicate with the past
-            
-            wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # (B, T, T)
-            wei = F.softmax(wei, dim=-1) # (B, T, T)
-            wei = self.dropout(wei)
-            # perform the weighted aggregation of the values
-            v = self.value(x) # (B,T,hs)
-            out = wei @ v # (B, T, T) @ (B, T, hs) -> (B, T, hs)
-            return out
-        
-        
-        
 model = BigramLanguageModel()
 m = model.to(device)
 
