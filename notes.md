@@ -26,3 +26,53 @@ Find a dataset that is very large, so large that you can't see a gap between tra
 
 ### EX4: Research and Implementation
 Read some transformer papers and implement one additional feature or change that people seem to use. Does it improve the performance of your GPT?
+
+
+`#### Residual Connections: `
+The Formula: 
+In traditional feedforward neural networks, data flows through each layer sequentially: The output of a layer is the input for the next layer.
+
+Residual connection provides another path for data to reach latter parts of the neural network by skipping some layers. Consider a sequence of layers, layer i to layer i + n, and let F be the function represented by these layers. Denote the input for layer i by x. In the traditional feedforward setting, x will simply go through these layers one by one, and the outcome of layer i + n is F(x). A residual connection that bypasses these layers typically works as follows:
+
+
+Figure 1. Residual Block. Created by the author.
+The residual connection first applies identity mapping to x, then it performs element-wise addition F(x) + x. In literature, the whole architecture that takes an input x and produces output F(x) + x is usually called a residual block or a building block. Quite often, a residual block will also include an activation function such as ReLU applied to F(x) + x.
+![Residual Connections](images/residual_connections.png)
+
+The main reason for emphasizing the seemingly superfluous identity mapping in the figure above is that it serves as a placeholder for more complicated functions if needed. For example, the element-wise addition F(x) + x makes sense only if F(x) and x have the same dimensions. If their dimensions are different, we can replace the identity mapping with a linear transformation (i.e. multiplication by a matrix W), and perform F(x) + Wx instead.
+
+In general, multiple residual blocks, which may be of the same or different architectures, are used within the whole neural network.
+
+How does it help training deep neural networks
+For feedforward neural networks, training a deep network is usually very difficult, due to problems such as exploding gradients and vanishing gradients. On the other hand, the training process of a neural network with residual connections is empirically shown to converge much more easily, even if the network has several hundreds layers. Like many techniques in deep learning, we still do not fully understand all the details about residual connection. However, we do have some interesting theories that are supported by strong experimental results.
+
+Behaving Like Ensembles of Shallow Neural Networks
+For feedforward neural networks, as we have mentioned above, the input will go through each layer of the network sequentially. More technically speaking, the input goes through a single path that has length equal to the number of layers. On the other hand, networks with residual connections consist of many paths of varying lengths.
+
+![Residual Connections 2](images/unraveled_view_of_residual_connections.png)
+
+Figure 2. Unraveled View of Residual Connection. Created by the author.
+As an example, consider a network with 3 residual blocks. We can try to expand the formula of this network step by step:
+
+
+```
+x₃ = H(x₂) + x₂
+   = H(G(x₁) + x₁) + G(x₁) + x₁
+   = H(G(F(x₀) + x₀) + F(x₀) + x₀) + G(F(x₀) + x₀) + F(x₀) + x₀
+```
+There are 2³ = 8 terms of the input x₀ that contribute to the output x₃. Hence, we can also view this network as a collection of 8 paths, of lengths 0, 1, 2 and 3, as illustrated in the figure above.
+
+Under this “unraveled view”,  shows that networks with residual connections behave like ensembles of networks that do not strongly depend on each other. Moreover, most of the gradient during gradient descent training comes from short paths. In other words, residual connection does not resolve the exploding or vanishing gradient problems. Rather, it avoids those problems by having shallow networks in the “ensembles”.
+
+> Residual connections create a unique architectural pattern where the network can branch off from a main pathway, perform computations, and then merge back into the original pathway.
+
+**Gradient Distribution Through Addition:**
+The addition operation in residual connections has a crucial mathematical property: it distributes gradients equally to both of its input branches. When backpropagation occurs, the gradient flowing through an addition node splits evenly between the two paths that fed into it. This means that both the residual pathway (the identity mapping) and the transformed pathway (the learned function F(x)) receive the same gradient signal.
+
+**Gradient Flow and the "Superhighway" Effect:**
+The loss signal can propagate through every addition node in the network, creating a direct path from the final supervision signal all the way back to the input layer. This creates what's often called a "gradient superhighway" - an unimpeded pathway that allows gradients to flow directly from the output to the input without being blocked or severely diminished by intermediate layers.
+
+**Initialization Strategy and Early Training:**
+During the initial stages of training, the residual blocks are typically initialized in a way that makes them contribute very little to the overall computation. 
+- In the beginning, the network essentially behaves like a shallow network, with most of the signal flowing through the residual pathway. As training progresses, the residual blocks gradually learn to contribute more meaningful transformations while maintaining the gradient flow benefits of the residual connections. 
+- At initialization, we can go directly from supervision to the input - gradient flow is unimpeded, and blocks gradually kick in over time.

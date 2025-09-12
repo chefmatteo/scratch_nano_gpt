@@ -368,3 +368,4 @@ context = torch.zeros((1, 1), dtype=torch.long, device=device)
 print("Sample of the model's output:")
 print(decode(model.generate(context, max_new_tokens=500)[0].tolist()))
 
+# skip connection/ residual connection: transform data, but then you have a skip connection to the original data, such that the original data is not lost, but you can add the transformed data to the original data
