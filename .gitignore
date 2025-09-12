@@ -2,5 +2,7 @@
 *.toml
 
 /scratch_nano_gpt
-.sh
+*.sh
 uv.lock
+tempCodeRunnerFile.py
+sample_request.py

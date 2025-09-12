@@ -197,7 +197,33 @@ class FeedForward(nn.Module):
         return self.net(x)
     
     
+class Block(nn.Module):
+    """ 
+    Transformer block: communication followed by computation 
     
+    - The transformer block alternates between communication (self-attention) and computation (feedforward).
+    - This design mimics the transformer architecture where blocks are grouped and duplicated to create
+    the full transformer model. Each block allows tokens to communicate with each other through
+    self-attention, then perform independent computation through feedforward layers. Except for the cross-attention layer.
+    
+    layer normalization: normalize the input to the layer to have a mean of 0 and a standard deviation of 1
+    """
+
+    def __init__(self, n_embd, n_head):
+        super().__init__()
+        head_size = n_embd // n_head
+        self.sa = MultiHeadAttention(n_head, head_size)
+        self.ffwd = FeedForward(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
+
+    def forward(self, x):
+        x = x + self.sa(self.ln1(x))
+        x = x + self.ffwd(self.ln2(x))
+        return x
+    
+    
+        
 # super simple bigram model with attention
 class BigramLanguageModel(nn.Module):
     # no need to pass the vocab size because we are using the same vocab size for the input and output
@@ -216,7 +242,19 @@ class BigramLanguageModel(nn.Module):
         # 4 communication channels -> 8 dimensional vectors, and that concatenate the heads and project the result to the embedding dimension over the channel dime -> 32 i.e. 4 heads of 8 - dimensional self-attention (similar to group convolution)
         
         self.ffwd = FeedForward(n_embd) # feedforward layer
+        
+        # assume we have 5 blocks in the transformer
+        self.blocks = nn.Sequential(
+            Block(n_embd, n_head=4), 
+            Block(n_embd, n_head=4), 
+            Block(n_embd, n_head=4), 
+            Block(n_embd, n_head=4), 
+            Block(n_embd, n_head=4)
+        )
+        # but with just the transformer block, it doesnt work well. Because it is a huge neural net, and it ran into the optimization issue.
+        
         self.lm_head = nn.Linear(n_embd, vocab_size) # linear layer to project the embedding to the vocab size
+        
         
     def forward(self, idx, targets=None):
 
@@ -329,3 +367,4 @@ for iter in range(max_iters):
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
 print("Sample of the model's output:")
 print(decode(model.generate(context, max_new_tokens=500)[0].tolist()))
+
