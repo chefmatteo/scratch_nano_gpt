@@ -157,6 +157,47 @@ class MultiHeadAttention(nn.Module):
     # concatenate the heads and project the result to the embedding dimension over the channel dime 
     
     # create multiple independent communication channels -> gather datas -> attention heads -> more expressive model 
+    
+    
+    
+# we want to implement computation per node: 
+class FeedForward(nn.Module):
+    """ 
+    FeedForward vs Forward:
+    
+    FeedForward: A neural network layer that applies linear transformations followed by non-linear activations.
+    - Expands input from n_embd to 4*n_embd dimensions
+    - Applies ReLU activation for non-linearity
+    - Projects back down to n_embd dimensions
+    - Includes dropout for regularization
+    
+    Forward: The method that defines how data flows through the layer during computation.
+    - Takes input tensor x and passes it through the network
+    - Returns the transformed output
+    - Called automatically during model execution
+    
+    Functionality: FeedForward enables each token to perform independent computation
+    after communication (attention), allowing the model to process and transform
+    the information gathered from other tokens.
+    
+    Once they received all the information, they need to think independently and in parallel
+    """
+
+    def __init__(self, n_embd):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_embd, 4 * n_embd), # First linear layer: expands from embedding dimension to 4x embedding dimension
+            nn.ReLU(),                     # ReLU activation function: introduces non-linearity and sets negative values to 0
+            nn.Linear(4 * n_embd, n_embd),  # Second linear layer: projects back down to original embedding dimension
+            nn.Dropout(dropout) # Dropout layer: randomly sets a certain percentage of neurons to 0 during training to prevent overfitting
+        )
+
+    # all the tokens here do the computation in parallel & independently
+    def forward(self, x):
+        return self.net(x)
+    
+    
+    
 # super simple bigram model with attention
 class BigramLanguageModel(nn.Module):
     # no need to pass the vocab size because we are using the same vocab size for the input and output
@@ -169,9 +210,12 @@ class BigramLanguageModel(nn.Module):
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         # block_size is the maximum context length for predictions, so we need to create a lookup table for the position embeddings
         self.sa_head = MultiHeadAttention(4, n_embd // 4) # self-attention head
-        # n_embd // 4 is the number of heads, and n_embd is the number of embedding dimensions
+        self.ffwd = FeedForward(n_embd) # feedforward layer
+        self.lm_head = nn.Linear(n_embd, vocab_size) # linear layer to project the embedding to the vocab size
+        # n_embd // 4 is the number of heads, and n_embd is the number of embedding dimensions
         # 4 communication channels -> 8 dimensional vectors, and that concatenate the heads and project the result to the embedding dimension over the channel dime -> 32 i.e. 4 heads of 8 - dimensional self-attention (similar to group convolution)
         
+        self.ffwd = FeedForward(n_embd) # feedforward layer
         self.lm_head = nn.Linear(n_embd, vocab_size) # linear layer to project the embedding to the vocab size
         
     def forward(self, idx, targets=None):
@@ -191,6 +235,10 @@ class BigramLanguageModel(nn.Module):
         x = self.sa_head(x) # (B,T,C)
         
         # project to vocab size for next token prediction
+        # we went to fast to compute the logits, so we need to add a feedforward layer to compute the logits
+        # the token talk to each other but they dont have that much time to talk to each other, so we need to add a feedforward layer to compute the logits
+        # we want them to think independently and in parallel
+        x = self.ffwd(x) # (B,T,C), the feedforward layer is used to compute the logits
         logits = self.lm_head(x) # (B,T,vocab_size)
         
 
