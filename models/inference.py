@@ -4,7 +4,10 @@ Simple inference script for quick text generation
 """
 
 import torch
-from generate_text import load_model, generate_text
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from output import load_model, generate_text
 
 def quick_generate(prompt, model_path='trained_gpt_model.pth', max_tokens=200):
     """Quick text generation function"""

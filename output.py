@@ -8,8 +8,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-# Import the model classes from bigram_v2.py
-from bigram_v2 import BigramLanguageModel, Head, MultiHeadAttention, FeedForward, Block
+# Import the model classes from models.bigram_v2
+from models.bigram_v2 import BigramLanguageModel, Head, MultiHeadAttention, FeedForward, Block
 
 def load_model(model_path='trained_gpt_model.pth'):
     """Load the trained model and vocabulary"""
